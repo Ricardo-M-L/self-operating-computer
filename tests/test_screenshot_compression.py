@@ -14,7 +14,7 @@ class ScreenshotCompressionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # Only desktop capture dependencies are stubbed; Pillow and file IO are real.
-        with patch.dict(
+        native_imports = patch.dict(
             sys.modules,
             {
                 "pyautogui": MagicMock(),
@@ -23,21 +23,31 @@ class ScreenshotCompressionTests(unittest.TestCase):
                 "Xlib.X": MagicMock(),
                 "Xlib.Xutil": MagicMock(),
             },
-        ):
-            cls.screenshot = importlib.import_module("operate.utils.screenshot")
+        )
+        native_imports.start()
+        cls.addClassCleanup(native_imports.stop)
+        cls.screenshot = importlib.import_module("operate.utils.screenshot")
 
     def assert_compressed(self, image, expected, **save_options):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "source.png"
             target = Path(directory) / "compressed.jpg"
             image.save(source, **save_options)
+            with Image.open(source) as fixture:
+                self.assertEqual(fixture.mode, image.mode)
+                self.assertEqual(fixture.getpixel((8, 8)), image.getpixel((8, 8)))
             self.screenshot.compress_screenshot(source, target)
             with Image.open(target) as result:
+                result.load()
                 self.assertEqual(result.format, "JPEG")
                 self.assertEqual(result.mode, "RGB")
                 self.assertEqual(result.size, image.size)
                 for actual, wanted in zip(result.getpixel((8, 8)), expected):
-                    self.assertLessEqual(abs(actual - wanted), 3)
+                    self.assertLessEqual(
+                        abs(actual - wanted),
+                        3,
+                        f"pixel={result.getpixel((8, 8))}, expected={expected}",
+                    )
             with Image.open(source) as original:
                 self.assertEqual(original.mode, image.mode)
 
